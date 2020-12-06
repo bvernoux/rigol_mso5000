@@ -27,7 +27,7 @@
 #include "socket_portable.h"
 
 #define APP_NAME "MSO5000_SCPI"
-#define VERSION "v0.1 06/12/2020 B.VERNOUX"
+#define VERSION "v0.1.1 06/12/2020 B.VERNOUX"
 
 #define BANNER1 APP_NAME " " VERSION "\n"
 #define BANNER2 APP_NAME " <hostname> <port> [-n<nb_waveform>] [-f<waveform_rx_raw_data.bin>]\n"
@@ -71,7 +71,7 @@ void printf_dbg(const char *fmt, ...)
 
 	gettimeofday(&curr_tv, NULL);
 	get_CurrentTime(currTime, CURR_TIME_SIZE);
-	printf("%s (%05.04f s) ", currTime, TimevalDiff(&curr_tv, &start_tv));
+	printf("%s (%05.03f s) ", currTime, TimevalDiff(&curr_tv, &start_tv));
 
 	va_start(args, fmt);
 	vprintf(fmt, args);
@@ -105,22 +105,8 @@ void consoleHandler(int s)
 }
 #endif
 
-/*
-* error - wrapper for perror
-*/
-void error(char *msg)
+void cleanup(void)
 {
-	if(msg != NULL)
-	{
-		if(sockGetErrno() != 0)
-		{
-			printf("%s:\n %s\n", msg, sockStrError(sockGetErrno()));
-		}else
-		{
-			printf("%s\n", msg);
-		}
-	}
-
 	if(outfp != NULL)
 	{
 		fclose(outfp);
@@ -140,7 +126,27 @@ void error(char *msg)
 		free(buf);
 		buf = NULL;
 	}
-	exit(0);
+}
+
+/*
+* error - wrapper for perror
+*/
+void error(char *msg)
+{
+	if(msg != NULL)
+	{
+		if(sockGetErrno() != 0)
+		{
+			printf("%s:\n %s\n", msg, sockStrError(sockGetErrno()));
+		}else
+		{
+			printf("%s\n", msg);
+		}
+	}
+
+	cleanup();
+
+	exit(-1);
 }
 
 /* Return nb data read or 0 in case of error */
@@ -159,10 +165,22 @@ int read_chan_data(void)
 	read_nb = socket_read_nbytes(sockfd, buf, 11);
 	if(read_nb != 11)
 	{
-		error("ERROR recv() to read from socket");
+		printf_dbg("ERROR socket_read_nbytes() to read from socket\n");
+		error("ERROR recv()");
 	}
 	nb_data = atoi((char *)&buf[2]);
 	printf_dbg("WAV:DATA?=%s (nb_data=%d)\n", buf, nb_data);
+	// Add robustness check to avoid buffer overflow/underflow
+	if(nb_data < 0)
+	{
+		printf_dbg("Error nb_data(%d)< 0\n", nb_data);
+		return 0;
+	}
+	if(nb_data >= BUFSIZE)
+	{
+		printf_dbg("Error nb_data(%d) >= BUFSIZE(%d)\n", nb_data, BUFSIZE);
+		return 0;
+	}
 
 	int expected_nb_data = nb_data;
 	int nb_total_read = 0;
@@ -202,7 +220,8 @@ int read_chan_data(void)
 		read_nb = socket_read_nbytes(sockfd, buf_last_data, 1);
 		if(read_nb != 1)
 		{
-			error("ERROR recv() to read from socket");
+			printf_dbg("ERROR socket_read_nbytes() to read from socket\n");
+			error("ERROR recv()");
 		}
 
 		//printf_dbg("End=0x%02X\n",	buf_last_data[0]);
@@ -216,9 +235,9 @@ int read_chan_data(void)
 					// double ydelta = yorigin + yreference;
 					// float v = (float(buf[j]) - ydelta) * yincrement;
 					fwrite_nb = fwrite(buf, sizeof(char), nb_total_read, outfp);
-					if(fwrite_nb != read_nb)
+					if(fwrite_nb != nb_total_read)
 					{
-						printf_dbg("fwrite() on outfp error len=%d != expected %d\n", fwrite_nb, read_nb);
+						printf_dbg("fwrite() on outfp error len=%d != expected %d\n", fwrite_nb, nb_total_read);
 					}
 				}
 			}
@@ -317,10 +336,8 @@ int main(int argc, char **argv)
 
 	server = gethostbyname(hostname);
 	if (server == NULL) {
-		printf("ERROR, no such host as %s\n", hostname);
-		if(outfp != NULL)
-			fclose(outfp);
-		exit(-5);
+		printf("ERROR no such host as %s\n", hostname);
+		error("ERROR gethostbyname()");
 	}
 
 	/* build the server's Internet address */
@@ -338,8 +355,8 @@ int main(int argc, char **argv)
 
 	// TCP_NODELAY = 1 => Disable Nagle's algorithm for send coalescing.
 	sockSetOpt(sockfd, "TCP_NODELAY", IPPROTO_TCP, TCP_NODELAY, 1);
-	int timeout_in_seconds = 5;
-	// Set RX & TX Timeout to 5 seconds
+	int timeout_in_seconds = 40;
+	// Set RX & TX Timeout to 40 seconds required to capture up to 200Mpts
 	sockSetOpt_Timeout(sockfd, "SO_RCVTIMEO", SOL_SOCKET, SO_RCVTIMEO, timeout_in_seconds);
 	sockSetOpt_Timeout(sockfd, "SO_SNDTIMEO", SOL_SOCKET, SO_SNDTIMEO, timeout_in_seconds);
 
@@ -372,7 +389,8 @@ int main(int argc, char **argv)
 	read_nb = recv(sockfd, (char *)buf, 20, 0);
 	if(read_nb <= 0)
 	{
-		error("ERROR recv() to read from socket");
+		printf_dbg("ERROR recv() to read from socket\n");
+		error("ERROR recv()");
 	}
 	printf_dbg("*OPC?=%s", buf);
 	/* Check Operation Complete */
@@ -385,7 +403,8 @@ int main(int argc, char **argv)
 	read_nb = recv(sockfd, (char *)buf, 200, 0);
 	if(read_nb <= 0)
 	{
-		error("ERROR recv() to read from socket");
+		printf_dbg("ERROR recv() to read from socket\n");
+		error("ERROR recv()");
 	}
 	printf_dbg("IDN?=%s", buf);
 
@@ -409,7 +428,8 @@ int main(int argc, char **argv)
 		read_nb = recv(sockfd, (char *)buf, 10, 0);
 		if(read_nb <= 0)
 		{
-			error("ERROR recv() to read from socket");
+			printf_dbg("ERROR recv() to read from socket\n");
+			error("ERROR recv()");
 		}
 		printf_dbg(":CHAN%d:DISP?=%s", i+1, buf);
 		int chan_enabled = atoi((char *)buf);
@@ -452,7 +472,8 @@ int main(int argc, char **argv)
 			read_nb = recv(sockfd, (char *)buf, 20, 0);
 			if(read_nb <= 0)
 			{
-				error("ERROR recv() to read from socket");
+				printf_dbg("ERROR recv() to read from socket\n");
+				error("ERROR recv()");
 			}
 			printf_dbg(":TRIG:STAT?=%s", buf);
 			if( strncmp((char*)buf, "STOP", 4) == 0 )
@@ -476,7 +497,8 @@ int main(int argc, char **argv)
 			read_nb = recv(sockfd, (char *)buf, 200, 0);
 			if(read_nb <= 0)
 			{
-				error("ERROR recv() to read from socket");
+				printf_dbg("ERROR recv() to read from socket\n");
+				error("ERROR recv()");
 			}
 			printf_dbg(":WAV:PRE?=%s", buf);
 			sscanf((char *)buf,
@@ -520,19 +542,7 @@ int main(int argc, char **argv)
 	}
 	printf("\n");
 
-	if(outfp != NULL)
-	{
-		fclose(outfp);
-		outfp = NULL;
-	}
-	if(sockfd != -1)
-	{
-		sockClose(sockfd);
-		sockfd = -1;
-	}
-	sockQuit();
-	if(buf != NULL)
-		free(buf);
+	cleanup();
 
 	return 0;
 }
