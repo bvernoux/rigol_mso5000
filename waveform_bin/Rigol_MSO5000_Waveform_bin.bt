@@ -1,0 +1,162 @@
+//------------------------------------------------
+//--- 010 Editor v7.0 Binary Template
+//
+//   File: Rigol_MSO5000_Waveform_bin.bt
+//   Authors: Benjamin Vernoux
+//   Version: 0.2
+//   Purpose: Parse Rigol MSO5000 Waveform *.bin file
+//   Category: Electronics
+//   File Mask: *.bin
+//   ID Bytes: 52 47
+//   History: 
+//   0.1  2020-11-25 B Vernoux: Initial release.
+//   0.2  2020-11-25 B Vernoux: Add unknown fields / major refactor
+//    Thanks to miek for the link on Keysight website which use same bin format as Rigol MSO5000
+//    https://www.keysight.com/main/redirector.jspx?action=ref&cname=EDITORIAL&ckey=3088654&lc=fre&cc=FR&nfr=-32541.0.00
+//
+//------------------------------------------------
+
+local char l_cookie[2];
+
+typedef enum <int>
+{
+	Unknown_Type = 0,
+	Normal = 1,
+	Peak_Detect = 2,
+	Average = 3,
+	Horizontal_Histogram = 4,
+	Vertical_Histogram = 5,
+	Logic = 6
+} waveform_type_t;
+
+typedef enum <short>
+{
+	Unknown_data = 0,
+	Normal_32bit_float_data = 1,
+	Maximum_float_data = 2,
+	Minimum_float_data = 3,
+	Time_float_data = 4,
+	Counts_32bit_float_data = 5,
+	Digital_u8_char_data = 6
+} waveform_buffers_type_t;
+
+typedef enum <int>
+{
+	Unknown_Unit = 0,
+	Volts = 1,
+	Seconds = 2,
+	Constant = 3,
+	Amps = 4,
+	dB = 5,
+	Hz = 6
+} units_t;
+
+struct rigol_mso5k_bin_waveforms
+{
+	unsigned int waveform_header_size;
+	waveform_type_t waveform_type;
+	unsigned int nb_waveform_buffers;
+	unsigned int nb_points;
+	unsigned int count;
+	float x_display_range;
+	double x_display_origin;
+	double x_increment;
+	double x_origin;
+	units_t x_units;
+	units_t y_units;
+	char date[16];
+	char time[16];
+	char model_sn[24];
+	char waveform_label[16];
+	double time_tags;
+	unsigned int segment_index;
+	unsigned int waveform_data_header_size;
+	waveform_buffers_type_t buffer_type;
+	unsigned short bytes_per_point;
+	unsigned long buffer_size;
+	
+	if( (waveform_label[0] == 'L' && waveform_label[1] == 'A') && 
+			(l_cookie[0] == 'R' && l_cookie[1] == 'G') )
+	{
+		unsigned short data[buffer_size/bytes_per_point] <format=hex>;
+	} else {
+		switch(buffer_type)
+		{
+			case Normal_32bit_float_data:
+			case Maximum_float_data:
+			case Minimum_float_data:
+				float data[buffer_size/bytes_per_point] <format=hex>;
+			break;
+
+			case Digital_u8_char_data:
+			default:
+				unsigned char data[buffer_size/bytes_per_point] <format=hex>;
+			break;
+		}
+	}
+};
+
+struct rigol_mso5k_bin
+{
+	local unsigned int l_la_nb;
+	local unsigned int l_nb_points;
+	local int i;
+
+	l_la_nb = 0;
+	/* Identifier of the rigol_mso5k_bin file */
+	char cookie[2]; // RGXX (XX is often "01") or AGXX (For Agilent)
+	l_cookie[0] = cookie[0];
+	l_cookie[1] = cookie[1];
+	if( (cookie[0] == 'R' && cookie[1] == 'G') ||
+		(cookie[0] == 'A' && cookie[1] == 'G')) {
+		char file_version[2];
+		unsigned int file_size;
+		unsigned int nb_waveforms;
+
+		for(i=0; i < nb_waveforms; i++)
+		{
+			rigol_mso5k_bin_waveforms chan;
+			/* Logic Analyzer Chan */
+			if(chan[i].waveform_label[0] == 'L' && chan[i].waveform_label[1] == 'A') {
+				l_nb_points = chan[i].nb_points;
+				if(l_la_nb == 0) {
+					Printf("LA D7-D0 ");
+				}	else {
+					Printf("LA D15-D8 ");
+				}
+				l_la_nb += 1;
+			}else	{
+				/* Analog Chan */
+				l_nb_points = chan[i].nb_points;
+				Printf("CH%d ", i+1);
+			}
+			if(chan[i].x_increment <= 1e-9) {
+				Printf("%.fGSa/s(%.1fns) ", 
+						(1/chan[i].x_increment)/1e9,
+						chan[i].x_increment*1e9);
+			}else if(chan[i].x_increment <= 1e-6) {
+				Printf("%.1fMSa/s(%.3fus) ", 
+						(1/chan[i].x_increment)/1e6,
+						chan[i].x_increment*1e6);
+			}
+			else {
+				Printf("%.fKSa/s(%.3fms) ", 
+						(1/chan[i].x_increment)/1e3,
+						(chan[i].x_increment)*1e3);
+			}
+
+			if(l_nb_points >= 1e6) {
+				Printf("%.fMpts ", l_nb_points/1e6);
+			}else {
+				Printf("%.fkpts ", l_nb_points/1e3);
+			}
+			Printf("x_origin: %fs\n", chan[i].x_origin);
+		}
+	} else {
+		Printf("Invalid Rigol MSO5000 bin file\n");
+	}
+};
+
+LittleEndian(); 
+
+struct rigol_mso5k_bin rigol_mso5k_bin_data;
