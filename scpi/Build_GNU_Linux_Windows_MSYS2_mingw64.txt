@@ -1,9 +1,0 @@
-
-Build GNU/Linux
-* cd to current directory
-* make clean all
-
-Build Windows
-* Launch C:\msys64\mingw64.exe
-* cd to current directory
-* mingw32-make clean all
