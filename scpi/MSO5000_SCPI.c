@@ -22,12 +22,13 @@
 
 #include <stdarg.h>
 #include <inttypes.h>
+#include <float.h>
 #include <math.h>
 
 #include "socket_portable.h"
 
 #define APP_NAME "MSO5000_SCPI"
-#define VERSION "v0.1.1 06/12/2020 B.VERNOUX"
+#define VERSION "v0.1.2 13/12/2020 B.VERNOUX"
 
 #define BANNER1 APP_NAME " " VERSION "\n"
 #define BANNER2 APP_NAME " <hostname> <port> [-n<nb_waveform>] [-f<waveform_rx_raw_data.bin>]\n"
@@ -60,8 +61,8 @@ double yincrement;
 double yorigin;
 double yreference;
 
-#define FS_PER_SECOND 1e15
-int64_t fs_per_sample;
+#define FS_PER_SECOND ((double)1e15)
+size_t fs_per_sample;
 
 void error(char *msg);
 
@@ -150,7 +151,7 @@ void error(char *msg)
 }
 
 /* Return nb data read or 0 in case of error */
-int read_chan_data(void)
+int read_chan_data(int chan)
 {
 	int read_nb, fwrite_nb;
 	int nb_data;
@@ -160,6 +161,14 @@ int read_chan_data(void)
 	sprintf((char *)str_buf, ":WAV:DATA?\n");
 	printf_dbg("%s", str_buf);
 	socket_write_nbytes(sockfd, str_buf, strlen((char *)str_buf));
+
+	if(chan == 0)
+	{
+		sprintf((char *)str_buf, "*WAI\n");
+		printf_dbg("%s", str_buf);
+		socket_write_nbytes(sockfd, str_buf, strlen((char *)str_buf));
+	}
+
 	/* receive header from the server */
 	bzero(buf, 12);
 	read_nb = socket_read_nbytes(sockfd, buf, 11);
@@ -271,14 +280,20 @@ int main(int argc, char **argv)
 	int read_nb;
 	int is_chan_enabled[4];
 	int nb_chan;
+	int nb_total_acq_failed;
 	int nb_acq_failed;
 	int nb_acq_failed_curr_chan;
-	long nb_waveform = -1;
+	int nb_waveform = -1;
 	int nb_retry = 10;
 	int i;
 	
 	struct timeval start_acq;
 	struct timeval curr_acq;
+
+	float acq_time;
+	float acq_time_min = FLT_MAX;
+	float acq_time_max = FLT_MIN;
+	float acq_time_sum = 0;
 
 	struct timeval start_data;
 	struct timeval curr_data;
@@ -287,6 +302,12 @@ int main(int argc, char **argv)
 
 	printf(BANNER1);
 	printf("Stop with Ctrl-C\n");
+	printf("Parameters:\n");
+	for(i = 0; i < argc; i++)
+	{
+		printf("%s ", argv[i]);
+	}
+	printf("\n");
 
 	/* check command line arguments */
 	if ( (argc < 3) || (argc > 5) ) 
@@ -303,7 +324,7 @@ int main(int argc, char **argv)
 			if(strncmp(argv[i], "-n", 2) == 0)
 			{
 				nb_waveform = atoi(&argv[i][2]);
-				printf("nb_waveform: %ld\n", nb_waveform);
+				printf("nb_waveform: %d\n", nb_waveform);
 			} else if(strncmp(argv[i], "-f", 2) == 0)
 			{
 				from_server_filename = &argv[i][2];
@@ -416,7 +437,7 @@ int main(int argc, char **argv)
 	printf_dbg("%s", str_buf);
 	socket_write_nbytes(sockfd, str_buf, strlen((char *)str_buf));
 
-	/* Check how many Channels are displayed(enabled) */
+	/* Retrieve Channels details */
 	nb_chan = 0;
 	for(i = 0; i < 4; i++)
 	{
@@ -436,55 +457,6 @@ int main(int argc, char **argv)
 		if(chan_enabled == 1)
 		{
 			is_chan_enabled[i] = 1;
-			nb_chan++;
-		} else {
-			is_chan_enabled[i] = 0;
-		}
-	}
-
-	int nb_waveform_cnt = 0;
-	while(nb_waveform != 0)
-	{
-		if(nb_waveform > 0)
-			nb_waveform--;
-
-		nb_waveform_cnt++;
-		fprintf(stdout, "\nWaveform %d\n", nb_waveform_cnt);
-
-		nb_acq_failed = 0;
-		gettimeofday(&start_acq, NULL);
-
-		sprintf((char *)str_buf, ":SING\n");
-		printf_dbg("%s", str_buf);
-		socket_write_nbytes(sockfd, str_buf, strlen((char *)str_buf));
-		sprintf((char *)str_buf, "*WAI\n");
-		printf_dbg("%s", str_buf);
-		socket_write_nbytes(sockfd, str_buf, strlen((char *)str_buf));
-
-		while(1)
-		{
-			sprintf((char *)str_buf, ":TRIG:STAT?\n");
-			printf_dbg("%s", str_buf);
-			socket_write_nbytes(sockfd, str_buf, strlen((char *)str_buf));
-
-			/* receive info from the server */
-			bzero(buf, 21);
-			read_nb = recv(sockfd, (char *)buf, 20, 0);
-			if(read_nb <= 0)
-			{
-				printf_dbg("ERROR recv() to read from socket\n");
-				error("ERROR recv()");
-			}
-			printf_dbg(":TRIG:STAT?=%s", buf);
-			if( strncmp((char*)buf, "STOP", 4) == 0 )
-				break;
-		}
-
-		for(i = 0; i < 4; i++)
-		{
-			nb_acq_failed_curr_chan = 0;
-			if(is_chan_enabled[i] != 1)
-				continue;
 
 			sprintf((char *)str_buf, ":WAV:SOUR CHAN%d\n", i+1);
 			printf_dbg("%s", str_buf);
@@ -513,19 +485,83 @@ int main(int argc, char **argv)
 							&yincrement,
 							&yorigin,
 							&yreference);
-/*
+
 			fs_per_sample = round(sec_per_sample * FS_PER_SECOND);
-			printf_dbg("X: %zu points, %.8f origin, ref %.8f fs/sample %lld\n", npoints, xorigin, xreference, fs_per_sample);
+			printf_dbg("X: %zu points, %.8f origin, ref %.8f fs_per_sample %zu\n", npoints, xorigin, xreference, fs_per_sample);
 			printf_dbg("Y: %.8f inc, %.8f origin, %.8f ref\n", yincrement, yorigin, yreference);
-*/
+
+			nb_chan++;
+		} else {
+			is_chan_enabled[i] = 0;
+		}
+	}
+
+	int nb_waveform_cnt = 0;
+	nb_total_acq_failed = 0;
+	while(nb_waveform != 0)
+	{
+		if(nb_waveform > 0)
+			nb_waveform--;
+
+		nb_waveform_cnt++;
+		fprintf(stdout, "\nWaveform %d\n", nb_waveform_cnt);
+
+		nb_acq_failed = 0;
+		gettimeofday(&start_acq, NULL);
+
+		sprintf((char *)str_buf, ":SING\n");
+		printf_dbg("%s", str_buf);
+		socket_write_nbytes(sockfd, str_buf, strlen((char *)str_buf));
+
+		while(1)
+		{
+			sprintf((char *)str_buf, ":TRIG:STAT?\n");
+			printf_dbg("%s", str_buf);
+			socket_write_nbytes(sockfd, str_buf, strlen((char *)str_buf));
+
+			sprintf((char *)str_buf, "*WAI\n");
+			printf_dbg("%s", str_buf);
+			socket_write_nbytes(sockfd, str_buf, strlen((char *)str_buf));
+
+			/* receive info from the server */
+			bzero(buf, 21);
+			read_nb = recv(sockfd, (char *)buf, 20, 0);
+			if(read_nb <= 0)
+			{
+				printf_dbg("ERROR recv() to read from socket\n");
+				error("ERROR recv()");
+			}
+			printf_dbg(":TRIG:STAT?=%s", buf);
+			if( strncmp((char*)buf, "STOP", 4) == 0 )
+				break;
+		}
+
+		for(i = 0; i < 4; i++)
+		{
+			nb_acq_failed_curr_chan = 0;
+			if(is_chan_enabled[i] != 1)
+				continue;
+
+			sprintf((char *)str_buf, ":WAV:SOUR CHAN%d\n", i+1);
+			printf_dbg("%s", str_buf);
+			socket_write_nbytes(sockfd, str_buf, strlen((char *)str_buf));
+
+			if(i == 0)
+			{
+				sprintf((char *)str_buf, "*WAI\n");
+				printf_dbg("%s", str_buf);
+				socket_write_nbytes(sockfd, str_buf, strlen((char *)str_buf));
+			}
+
 			int retry;
 			float time_diff_s;
 			double speed_mbytes_per_sec;
 			gettimeofday(&start_data, NULL);
 			for(retry = 0; retry < nb_retry; retry++)
 			{
-				if(read_chan_data() > 0)
+				if(read_chan_data(i) > 0)
 					break;
+				nb_total_acq_failed++;
 				nb_acq_failed++;
 				nb_acq_failed_curr_chan++;
 			}
@@ -537,9 +573,29 @@ int main(int argc, char **argv)
 		} // Analog channels loop
 
 		gettimeofday(&curr_acq, NULL);
+		acq_time = TimevalDiff(&curr_acq, &start_acq);
+		acq_time_sum +=  acq_time;
+
+		if(acq_time < acq_time_min)
+			acq_time_min = acq_time;
+
+		if(acq_time > acq_time_max)
+			acq_time_max = acq_time;
+
 		get_CurrentTime(currTime, CURR_TIME_SIZE);
-		printf("%s Acq Time %05.04f s (%zu pts x %d chan, nb_acq_failed=%d)\n", currTime, TimevalDiff(&curr_acq, &start_acq), npoints, nb_chan, nb_acq_failed);
-	}
+		printf("%s Acq Time %05.04f s (%zu pts x %d chan, nb_acq_failed=%d)\n", currTime, acq_time, npoints, nb_chan, nb_acq_failed);
+	} // end while
+
+	get_CurrentTime(currTime, CURR_TIME_SIZE);
+
+	float ack_time_avg_s;
+	double speed_mbytes_per_sec;
+	ack_time_avg_s = (acq_time_sum / nb_waveform_cnt);
+	speed_mbytes_per_sec = (float)(((double)npoints*nb_chan)/(1024.0*1024.0)) / ack_time_avg_s;
+
+	printf("\n%s Acq Time min=%05.04fs, max=%05.04fs, avg=%05.04fs(%05.03f MBytes/s), nb_waveform_cnt=%d, nb_total_acq_failed=%d\n", 
+				currTime, acq_time_min, acq_time_max, ack_time_avg_s, speed_mbytes_per_sec, nb_waveform_cnt, nb_total_acq_failed);
+
 	printf("\n");
 
 	cleanup();
