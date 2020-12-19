@@ -11,7 +11,8 @@ How to Build Windows with MSYS2 mingw64
 * mingw32-make clean all
 
 Usage:
-* MSO5000_SCPI <hostname> <port> [-n<nb_waveform>] [-f<waveform_rx_raw_data.bin>]
+* `MSO5000_SCPI <hostname> <port> [-n<nb_waveform>] [-f<waveform_rx_raw_data.bin>]`
 
 Example:
-* MSO5000_SCPI 10.0.0.1 5555 -n10
+* `MSO5000_SCPI 10.0.0.1 5555 -n10`
+* `MSO5000_SCPI 10.0.0.1 5555 -n10 -fwaveform_rx_raw_data.bin`
