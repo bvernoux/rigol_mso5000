@@ -37,7 +37,7 @@ jobs:
       uses: actions/upload-artifact@v2
       with:
         name: MSO5000_SCPI-Ubuntu-${{env.APP_VERSION}}
-        path: scpi/MSO5000_SCPI
+        path: scpi
 
   MSO5000_SCPI_Windows:
     runs-on: windows-latest
@@ -75,4 +75,4 @@ jobs:
       uses: actions/upload-artifact@v2
       with:
         name: MSO5000_SCPI-Ubuntu-${{env.APP_VERSION}}
-        path: scpi/MSO5000_SCPI
+        path: scpi
