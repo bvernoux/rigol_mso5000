@@ -16,4 +16,4 @@ jobs:
     - name: cd scpi
       run: cd scpi
     - name: make
-      run: make
+      run: make -f Makefile
