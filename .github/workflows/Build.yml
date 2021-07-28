@@ -1,0 +1,38 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  PC_App_Ubuntu-20.04:
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v2
+
+    -  name: Get build timestamp
+      id: id_date
+      run: echo "::set-output name=timestamp::$(date +%Y-%m-%d-%H-%M-%S)"
+
+    - name: Get app version
+      id: id_version
+      run: |
+         cd scpi
+         app_major_minor_patch=`grep -oP '(?<=VERSION \"v)[0-9.]+' MSO5000_SCPI.c`
+         echo "::set-output name=app_version::v$app_major_minor_patch-${{steps.id_date.outputs.timestamp}}"
+
+    - name: Build app
+      run: |
+         cd scpi
+         make
+      shell: bash
+
+    - name: Upload artifact
+      env: 
+        APP_VERSION: "${{steps.id_version.outputs.app_version}}"
+      uses: actions/upload-artifact@v2
+      with:
+        name: MSO5000_SCPI-Ubuntu-${{env.APP_VERSION}}
+        path: scpi/MSO5000_SCPI
