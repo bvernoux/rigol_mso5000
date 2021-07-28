@@ -67,7 +67,6 @@ jobs:
       run: |
          cd scpi
          mingw32-make
-      shell: bash
 
     - name: Upload artifact
       env: 
