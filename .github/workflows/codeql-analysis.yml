@@ -33,7 +33,7 @@ jobs:
 
     - run: |
          cd scpi
-         make -j$(nproc) USE_Z3=yes HAVE_RULES=yes cppcheck
+         make -j$(nproc) USE_Z3=yes HAVE_RULES=yes
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v1
