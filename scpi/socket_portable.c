@@ -56,16 +56,16 @@ void get_CurrentTime(char* date_time_ms, int date_time_ms_max_size)
 	#define CURRENT_TIME_SIZE (30)
 	char currentTime[CURRENT_TIME_SIZE+1] = "";
 	time_t rawtime;
-	struct tm timeinfo;
+	struct tm * timeinfo;
   
 	struct timeval curTime;
 	gettimeofday(&curTime, NULL);
 	int milli = curTime.tv_usec / 1000;
 	
-	time(&rawtime);
-	localtime_r(&rawtime, &timeinfo);
+	time (&rawtime);
+	timeinfo = localtime(&rawtime);
 	
-	strftime(currentTime, CURRENT_TIME_SIZE, "%Y-%m-%d %H:%M:%S", &timeinfo);
+	strftime(currentTime, CURRENT_TIME_SIZE, "%Y-%m-%d %H:%M:%S", timeinfo);
 	snprintf(date_time_ms, (date_time_ms_max_size-1), "%s.%03d", currentTime, milli);
 }
 
