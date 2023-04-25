@@ -10,12 +10,12 @@ jobs:
   MSO5000_SCPI_Ubuntu:
     runs-on: ubuntu-20.04
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - name: Get build timestamp
       id: id_date
       shell: bash
-      run: echo "::set-output name=timestamp::$(date +%Y-%m-%d-%H-%M-%S)"
+      run: echo "timestamp=$(date +%Y-%m-%d-%H-%M-%S)" >> $GITHUB_OUTPUT
 
     - name: Get app version
       id: id_version
@@ -23,7 +23,7 @@ jobs:
       run: |
          cd scpi
          app_major_minor_patch=`grep -oP '(?<=VERSION \"v)[0-9.]+' MSO5000_SCPI.c`
-         echo "::set-output name=app_version::v$app_major_minor_patch-${{steps.id_date.outputs.timestamp}}"
+         echo "app_version=v$app_major_minor_patch-${{steps.id_date.outputs.timestamp}}" >> $GITHUB_OUTPUT
 
     - name: Build app
       shell: bash
@@ -34,7 +34,7 @@ jobs:
     - name: Upload artifact
       env: 
         APP_VERSION: "${{steps.id_version.outputs.app_version}}"
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: MSO5000_SCPI-Ubuntu-${{env.APP_VERSION}}
         path: scpi
@@ -45,7 +45,7 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - uses: msys2/setup-msys2@v2
       with:
           msystem: MINGW64
@@ -54,14 +54,14 @@ jobs:
 
     - name: Get build timestamp
       id: id_date
-      run: echo "::set-output name=timestamp::$(date +%Y-%m-%d-%H-%M-%S)"
+      run: echo "timestamp=$(date +%Y-%m-%d-%H-%M-%S)" >> $GITHUB_OUTPUT
 
     - name: Get app version
       id: id_version     
       run: |
          cd scpi
          app_major_minor_patch=`grep -oP '(?<=VERSION \"v)[0-9.]+' MSO5000_SCPI.c`
-         echo "::set-output name=app_version::v$app_major_minor_patch-${{steps.id_date.outputs.timestamp}}"
+         echo "app_version=v$app_major_minor_patch-${{steps.id_date.outputs.timestamp}}" >> $GITHUB_OUTPUT
 
     - name: Build app
       run: |
@@ -71,7 +71,7 @@ jobs:
     - name: Upload artifact
       env: 
         APP_VERSION: "${{steps.id_version.outputs.app_version}}"
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: MSO5000_SCPI-Windows-${{env.APP_VERSION}}
         path: scpi
